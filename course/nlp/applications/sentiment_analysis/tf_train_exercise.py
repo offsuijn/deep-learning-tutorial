@@ -50,77 +50,59 @@ class SentimentAnalysis():
         # 5) loss calcaulation
 
         def _embedding(x):
-            # character embedding 
-            print("-"*100)
-            print("Implement function '{}'".format(_embedding.__name__))
-            print("Keywords")
-            print("\t - tf.initializers.variance_scaling")
-            print("\t - tf.get_variable")
-            print("\t - tf.nn.embedding_lookup")
-            print("\t - tf.unstack")
+            # character embedding
+            shape       = [hps.vocab_size, hps.emb_size]
+            initializer = tf.initializers.variance_scaling(distribution="uiform",
+                                                           dtype=tf.float32)
 
-            print('Input : Tensor("model/pl_tokens:0", shape=(?, 128), dtype=int32)')
+            emb_mat     = tf.get_variable("emb", shape,
+                                          initializer=initializer,
+                                          dtype=tf.float32)
 
-            
-            print("Return: a list of <tf.Tensor shape=(?, 50) dtype=float32>")
-            print("        len(a_list) = 128")
+            # [batch_size, sent_len, emb_dim]
+            input_emb   = tf.nn.embedding_lookup(emb_mat, x)
 
-            step_inputs = None # should be implemented
+            # split input_emb -> num_steps
+            step_inputs = tf.unstack(input_emb, axis=1)
             return step_inputs
 
         def _sequence_dropout(step_inputs, keep_prob):
             # apply dropout to each input
             # input : a list of input tensor which shape is [None, input_dim]
-            print("-"*100)
             with tf.name_scope('sequence_dropout') as scope:
-                print("Implement step_outputs")
-                print("Keywords")
-                print("\t - tf.nn.dropout")
-
-
-
-            print("Return: a list of <tf.Tensor shape=(?, 50) dtype=float32>")
-            step_outputs = None # should be implemented
+                step_outputs = []
+                for t, input in enumerate(step_inputs):
+                    step_outputs.append(tf.nn.dropout(input, keep_prob))
             return step_outputs
 
         def sequence_encoding_n21_rnn(step_inputs, cell_size, scope_name):
             # rnn based N21 encoding (GRU)
-            print("-"*100)
-            print("Implement function '{}'".format(sequence_encoding_n21_rnn.__name__))
-            print('Input : a list of <tf.Tensor shape=(?, 50), dtype=float32>')
-            print("Keywords")
-            print("\t - tf.contrib.rnn.GRUCell")
-            print("\t - tf.contrib.rnn.static_rnn")
+            step_inputs = list(reversed(step_inputs))
+            f_rnn_cell = tf.contrib.rnn.GRUCell(cell_size, reuse=None)
+            _inputs = tf.stack(step_inputs, axis=1)
+            step_outputs, final_state = tf.contrib.rnn.static_rnn(f_rnn_cell,
+                                                                  step_inputs,
+                                                                  dtype=tf.float32,
+                                                                  scope=scope_name)
 
-            print("Return: a list of <tf.Tensor, shape=(?, 100)>")
-            out = None # should be implemented
+            out = step_outputs[-1]
             return out
 
         def _to_class(input, num_class):
-            print("-"*100)
-            print("Implement function '{}'".format(_to_class.__name__))
-            print('Input : tf.Tensor, shape=(?, 100), dtype=float32')
-            print("Keywords")
-            print("\t - tensorflow.contrib.layers.python.layers.linear")
-
-            print("Return: tf.Tensor, shape=(?, 4), dtype=float32")
-            out = None # should be implemented
+            # out = [batch_size, num_class = 4]
+            out = linear(input, num_class, scope="Rnn2Sentiment")
             return out
 
         def _loss(out, ref):
             # out : [batch_size, num_class] float - unscaled logits
             # ref : [batch_size] integer
             # calculate loss function using cross-entropy
-            print("-"*100)
-            print('Input out: tf.Tensor, shape=(?, 4)')
-            print('Input ref: tf.Tensor("model/pl_target:0", shape=(?,), dtype=int32)')
-
-            print("Keywords")
-            print("\t - tf.nn.sparse_softmax_cross_entropy_with_logits")
-            print("\t - tf.reduce_mean")
-            
-            print("Return: tf.Tensor, shape=(), dtype=float32")
-            loss = None # should be implemented
+            batch_loss = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                logits=out,
+                labels=ref,
+                name="sentiment_loss"
+            ) # [batch_size]
+            loss = tf.reduce_mean(batch_loss) # [batch_size] -> scalar
             return loss
         
         seq_length    = tf.reduce_sum(self.w, 1) # [batch_size]
