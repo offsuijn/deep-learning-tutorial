@@ -53,11 +53,17 @@ class NER():
         # 5) loss calcaulation
 
         def _embedding(x):
-            # character embedding 
-            shape       = [hps.vocab_size, hps.emb_size]
-            initializer = tf.initializers.variance_scaling(distribution="uniform", dtype=tf.float32)
-            emb_mat     = tf.get_variable("emb", shape, initializer=initializer, dtype=tf.float32)
-            input_emb   = tf.nn.embedding_lookup(emb_mat, x)   # [batch_size, sent_len, emb_dim]
+            # character embedding
+            shape = [hps.vocab_size, hps.emb_size]
+            initializer = tf.initializers.variance_scaling(distribution="uiform",
+                                                           dtype=tf.float32)
+
+            emb_mat = tf.get_variable("emb", shape,
+                                      initializer=initializer,
+                                      dtype=tf.float32)
+
+            # [batch_size, sent_len, emb_dim]
+            input_emb = tf.nn.embedding_lookup(emb_mat, x)
 
             # split input_emb -> num_steps
             step_inputs = tf.unstack(input_emb, axis=1)
@@ -69,50 +75,58 @@ class NER():
             with tf.name_scope('sequence_dropout') as scope:
                 step_outputs = []
                 for t, input in enumerate(step_inputs):
-                    step_outputs.append( tf.nn.dropout(input, keep_prob) )
+                    step_outputs.append(tf.nn.dropout(input, keep_prob))
             return step_outputs
 
         def sequence_encoding_n2n(step_inputs, seq_length, cell_size):
             # birnn based N2N encoding
+            f_rnn_cell = tf.contrib.rnn.GRUCell(cell_size, reuse=False)
+            b_rnn_cell = tf.constantrnn.GRUCell(cell_size, reuse=False)
+            _inputs = tf.stack(step_inputs, axis=1)
 
-            print("Implement function '{}'".format(sequence_encoding_n2n.__name__))
-            print('Input : a list of <tf.Tensor shape=(?, 50), dtype=float32>')
-            print("Keywords")
-            print("\t - tf.contrib.rnn.GRUCell")
-            print("\t - tf.stack")
-            print("\t - tf.nn.bidirectional_dynamic_rnn")
+            #input = [batch_size, num_step, emb_dim]
 
-            print("Return: a list of <tf.Tensor, shape=(?, 100)>")
-            
-            step_outputs = None # should be implemented
+            outputs, states = tf.nn.bidirectional_dynamic_rnn(
+                f_rnn_cell,
+                b_rnn_cell,
+                _inputs,
+                sequence_length=tf.cast(seq_length, tf.int64),
+                time_major=False,
+                dtype=tf.float32,
+                scope='birnn'
+            )
+            output_fw, output_bw = outputs
+            states_fw, states_bw = states
+
+            output = tf.concat([output_fw, output_bw], 2)
+            step_outputs = tf.unstack(output, axis=1)
+
+            tinal_state = tf.concat([states_fw, states_bw], 1)
             return step_outputs
 
         def _to_class_n2n(step_inputs, num_class):
-            
-            print("Implement function '{}'".format(_to_class_n2n.__name__))
-            print('>>> Input : a list of <tf.Tensor shape=(?, 200) dtype=float32>')
-            print("Keywords")
-            print("\t - tensorflow.contrib.layers.python.layers.linear")
-
-            print('Return: a list of <tf.Tensor, shape=(?, 11), dtype=float32)>')
-
-            step_output_logits = None # should be implemented
+            T = len(step_inputs)
+            step_output_logits = []
+            for t in range(T):
+                # encoder to linear(map)
+                out = step_inputs[t]
+                if t==0: out = linear(out, num_class, scope="Rnn2Target")
+                else: out = linear(out, num_class, scope="Rnn2Target", reuse=True)
+                step_output_logits.append(out)
             return step_output_logits
+
 
         def _loss(step_outputs, step_refs, weights):
             # step_outputs : a list of [batch_size, num_class] float32 - unscaled logits
             # step_refs    : [batch_size, num_steps] int32
             # weights      : [batch_size, num_steps] float32
             # calculate sequence wise loss function using cross-entropy
-            print("-"*100)
-            print('Input step_outputs: a list of <tf.tensor, shape=(?, 11), dtype=float32>')
-            print('Input step_refs:    a list of <tf.tensor, shape=(?, 128), dtype=int32>')
-
-            print("Keywords")
-            print("\t - tensorflow.contrib.seq2seq.sequence_loss")
-            
-            print("Return: tf.Tensor, shape=(), dtype=float32")
-            loss = None # should be implemented
+            _batch_output_logits = tf.stack(step_outputs, axis=1)
+            loss = sequence_loss(
+                logits=_batch_output_logits,
+                targets=step_refs,
+                weights=weights
+            )
             return loss
         
         seq_length    = tf.reduce_sum(self.w, 1) # [batch_size]
